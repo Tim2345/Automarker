@@ -58,7 +58,11 @@ class OTEDataFrame(pd.DataFrame):
 
         return df
 
+    def get_abilities(self, module_split_cols, ability_col):
+        
+        abilities = self.groupby(module_split_cols).apply(lambda x: x[ability_col].iloc[-1])
 
+        return abilities
 
     def make_runfile(self, item_column, response_column, key_column,
                      instance_columns, save_dir,
@@ -140,8 +144,6 @@ class OTEDataFrame(pd.DataFrame):
             anchor_items_string = ''.join(anchor_items_string)
 
             print(anchors)
-
-
 
         print('Constructing runfile...')
         # get index of first response (ITEM1)
