@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import numpy as np
+import os
 
 class OTEDataFrame(pd.DataFrame):
     @property
@@ -59,15 +60,14 @@ class OTEDataFrame(pd.DataFrame):
         return df
 
     def get_abilities(self, module_split_cols, ability_col):
-        
         abilities = self.groupby(module_split_cols).apply(lambda x: x[ability_col].iloc[-1])
 
         return abilities
 
-    def make_runfile(self, item_column, response_column, key_column,
+    def make_winsteps(self, item_column, response_column, key_column,
                      instance_columns, save_dir,
                      template_dir, analysis_name, anchors=None, item_diff_column=None):
-        # create winsteps runfile from data in current state
+        # create winsteps runfile from data in current object state
 
 
         # validate anchor arguments
@@ -211,4 +211,78 @@ class OTEDataFrame(pd.DataFrame):
         print("n test takers = {}".format(n_tts))
         print("n items = {}".format(n_items))
 
+    def make_facets(self, specification_dict, facets_dict, to_excel=True):
 
+        spec_string = []
+        for spec, val in specification_dict.items():
+            spec_string.append(' = '.join([spec, val]))
+
+        cols_for_filter = []
+        cols_for_melting = []
+        for val in facets_dict.values():
+            if isinstance(val, list):
+                cols_for_filter.extend(val)
+            else:
+                cols_for_filter.append(val)
+                cols_for_melting.append(val)
+
+        data_temp = self[cols_for_filter]
+        data_temp = data_temp.dropna()
+        data_reshaped = data_temp.melt(cols_for_melting)
+        data_reshaped = data_reshaped.sort_values('tt_ts')
+
+        rating_col_name = 'Rating'
+        data_reshaped.columns = list(facets_dict.keys()) + [rating_col_name]
+        # convert ratings columns to integer
+        data_reshaped[rating_col_name] = data_reshaped[rating_col_name].astype(int)
+        #
+        n = 1
+        spec_string.append('*\nLABELS = ')
+        code_dicts = dict()
+        data_reshaped_copy = data_reshaped.copy()
+
+        for col in data_reshaped_copy.drop(rating_col_name, axis=1):
+            tts = pd.Series(data_reshaped[col].unique())
+            num = pd.Series(tts.index + 1)
+            vals = num.astype(str) + ' = ' + tts.astype(str)
+            vals = vals.dropna()
+            vals = vals.to_string(index=False)
+            facet_header = ', '.join([str(n), col])
+            spec_string.append('\n'.join([facet_header, vals, '*']))
+            code_dict = dict(zip(tts, num))
+            code_dicts[col] = code_dict
+            # replace values in the data frame with their indexes for final specfile data
+            data_reshaped_copy[col] = data_reshaped_copy[col].replace(code_dict)
+
+            n += 1
+
+        spec_string.append('Data =')
+        spec_string.append(data_reshaped_copy.to_string(index=False, header=False))
+        spec_string.append('*')
+        spec_string = '\n'.join(spec_string)
+
+        # save spec_string to txt specfile format
+        f = open('{}_FACETS.txt'.format(specification_dict['Title']), 'w')
+        f.write(spec_string)
+        f.close()
+
+        # save data to excel if required
+        if to_excel:
+            dfs_zipped = zip(
+                ['Original_data', 'Indexed_data'],
+                [data_reshaped, data_reshaped_copy]
+            )
+            with pd.ExcelWriter(os.getcwd() + '//{}_data.xlsx'.format(specification_dict['Title'])) as writer:
+                for name, df in dfs_zipped:
+                    df.to_excel(writer, name, index=False)
+                writer.save()
+
+
+facets_dict = {
+    'this': 13,
+    'model': '?B,?B,?,#B,R7'
+}
+
+this = [' = '.join([key, str(val)]) for key, val in facets_dict.items()]
+
+print('\n'.join(this))
