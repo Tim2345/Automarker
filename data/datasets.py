@@ -276,6 +276,7 @@ class OTEDataFrame(pd.DataFrame):
                 for name, df in dfs_zipped:
                     df.to_excel(writer, name, index=False)
                 writer.save()
+        print('Facets file created and saved to working directory.')
 
 
 facets_dict = {
