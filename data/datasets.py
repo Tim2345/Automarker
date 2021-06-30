@@ -8,6 +8,11 @@ class OTEDataFrame(pd.DataFrame):
     def _constructor(self):
         return OTEDataFrame
 
+    @property
+    def base_class_view(self):
+        # use this to view the base class, needed for debugging in some IDEs.
+        return pd.DataFrame(self)
+
     @staticmethod
     def load_data(report_dir, **kwargs):
         if report_dir.endswith('.txt'):
@@ -278,12 +283,3 @@ class OTEDataFrame(pd.DataFrame):
                 writer.save()
         print('Facets file created and saved to working directory.')
 
-
-facets_dict = {
-    'this': 13,
-    'model': '?B,?B,?,#B,R7'
-}
-
-this = [' = '.join([key, str(val)]) for key, val in facets_dict.items()]
-
-print('\n'.join(this))
