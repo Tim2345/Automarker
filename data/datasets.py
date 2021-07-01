@@ -54,7 +54,7 @@ class OTEDataFrame(pd.DataFrame):
 
         return self[test_filter].reset_index(**kwargs)
 
-    def remove_data(self, to_remove):
+    def remove_instances(self, to_remove):
         for key in to_remove:
             column_name = key
             entries_to_remove = to_remove[key]
@@ -234,7 +234,8 @@ class OTEDataFrame(pd.DataFrame):
         data_temp = self[cols_for_filter]
         data_temp = data_temp.dropna()
         data_reshaped = data_temp.melt(cols_for_melting)
-        data_reshaped = data_reshaped.sort_values('tt_ts')
+        #TODO fix this and define sorting
+        #data_reshaped = data_reshaped.sort_values('tt_ts')
 
         rating_col_name = 'Rating'
         data_reshaped.columns = list(facets_dict.keys()) + [rating_col_name]
