@@ -8,12 +8,10 @@ from collections import OrderedDict
 import os
 import transformers
 import pickle
+from tqdm import tqdm
 
 from Automarker.scripts.data_prep.train_test_set import augmented_data, cleaned_data
 
-###load and run predictions
-# load all models from checkpoint
-checkpoint_dir = './multitask_model_adjusted_practice_175/checkpoint-2709'
 
 class MTLearningDataset(torch.utils.data.Dataset):
     def __init__(self, encodings, n_samples):
@@ -78,7 +76,11 @@ class MultitaskInference:
         return list(self.classifiers.keys())
 
     @classmethod
-    def decompose_from_checkpoint(cls, checkpoint_dir, save_path=checkpoint_dir):
+    def decompose_from_checkpoint(cls, checkpoint_dir, save_path=None):
+        if save_path == None:
+            save_path = checkpoint_dir
+
+
         model_dict = get_model_config_dict(checkpoint_dir)
 
         loaded_models = {
@@ -136,18 +138,42 @@ class MultitaskInference:
         self.classifiers = classifiers
 
 
-    def inference_run(self):
-        pass
+    def infer_base_model(self, base_model_loader):
+        self.base_model.to(self.device)
 
-    def infer(self, inputs, task_name):
+        base_model_outputs = []
+        with torch.no_grad():
+            for batch in tqdm(base_model_loader):
+                input_ids = batch['input_ids'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+                out = model.base_model(input_ids, attention_mask)
+                base_model_outputs.extend(out.last_hidden_state)
 
-        inputs.to(self.device)
+        base_model_outputs = torch.stack(base_model_outputs)
 
-        base_outputs = self.base_model(**inputs)
+        return base_model_outputs
 
-        head_outputs = self.classifiers[task_name](base_outputs.last_hidden_state)
 
-        return head_outputs
+    def infer_classifier(self, task, classifier_loader):
+
+        model.classifiers[task].to(model.device)
+
+        predictions = []
+        with torch.no_grad():
+            for batch in tqdm(classifier_loader):
+                out = self.classifiers[task](batch)
+                predictions.extend(out)
+
+        predictions = torch.stack(predictions)
+
+        return predictions
+
+###load and run predictions
+# load all models from checkpoint
+
+checkpoint_dir = './multitask_model_adjusted_practice_175/checkpoint-2709'
+texts = list(cleaned_data['ANSWER'].sample(100))
+task = 'automarker'
 
 text = '''
 
@@ -158,40 +184,58 @@ no body knew. the only thing he wanted to was consider the thought of not even b
 
 '''
 
-model = MultitaskInference.decompose_from_checkpoint(checkpoint_dir)
+#model = MultitaskInference.decompose_from_checkpoint(checkpoint_dir)
+
+batch_size = 25
+max_len = 200
 
 model = MultitaskInference.load_multitask(checkpoint_dir+'/MultitaskModel_co_au.pkl')
 
-inputs = model.tokenizer(text, return_tensors="pt")
+texts_encoded = model.tokenizer(texts, return_tensors="pt", truncation=True, max_length=max_len, padding='max_length')
+texts_dataset = MTLearningDataset(texts_encoded,  n_samples=len(texts))
+texts_dataloader = DataLoader(texts_dataset, batch_size=batch_size)
 
-this = model.infer(**inputs, task_name='automarker')
+base_model_out = model.infer_base_model(texts_dataloader)
 
+classifier_loader = DataLoader(base_model_out)
 
-
-
-inference_for = ['automarker', 'cola']
-
-
-
+final_predictions = model.infer_classifier(task, classifier_loader)
 
 
+### data
+model.base_model.to(model.device)
+
+base_model_outputs = []
+with torch.no_grad():
+    for batch in tqdm(texts_dataloader):
+
+        input_ids = batch['input_ids'].to(model.device)
+        attention_mask = batch['attention_mask'].to(model.device)
+        out = model.base_model(input_ids, attention_mask)
+        base_model_outputs.extend(out.last_hidden_state)
+
+base_model_outputs = torch.stack(base_model_outputs)
+
+base_model_outputs[0].size()
+base_model_outputs[:2]
+model.classifiers[task].to(model.device)
+model.classifiers[task](base_model_outputs[:2])
+
+head_loader = DataLoader(base_model_outputs, batch_size=batch_size)
+
+predictions = []
+with torch.no_grad():
+    for batch in tqdm(head_loader):
+
+        out = model.classifiers[task](batch)
+        predictions.extend(out)
 
 
 
 
-labels = torch.tensor([1]).unsqueeze(0)  # Batch size 1
-outputs = model.base_model(**inputs)
 
 
-model.classifiers['cola'](outputs.last_hidden_state)
-model.classifiers['automarker'](outputs.last_hidden_state)
 
 
-am_out = model.classifiers['automarker'](outputs.last_hidden_state)
-cola_out = model.classifiers['cola'](outputs.last_hidden_state)
 
 
-checkpoint_dir = './multitask_model_adjusted_practice_200/checkpoint-2709'
-model2 = transformers.RobertaForSequenceClassification.from_pretrained(checkpoint_dir+'/automarker')
-
-model2 = transformers.RobertaModel.from_pretrained('roberta-base')
