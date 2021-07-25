@@ -128,21 +128,42 @@ class MultitaskInference:
         if not hasattr(model, 'classifiers'):
             print("\033[0;31mLoaded object has no classifiers. At least one must be assigned before inference.\033[0m")
 
+        if not hasattr(model, 'dataset'):
+            model.dataset = MTLearningDataset
+
+        if not hasattr(model, 'data_loader'):
+            model.dataloader = DataLoader
+
         model.device = check_cuda()
 
         return model
 
-    def __init__(self, tokenizer, base_model, classifiers, data_loader=DataLoader):
+    def __init__(self, tokenizer, base_model, classifiers, dataset=MTLearningDataset, dataloader=DataLoader):
         self.tokenizer = tokenizer
         self.base_model = base_model
         self.classifiers = classifiers
-        self.dataloader = data_loader
+        self.dataset = dataset
+        self.dataloader = dataloader
 
+    def encodings_to_loader(self, encodings, n_samples, batch_size):
+        texts_dataset = self.dataset(encodings, n_samples=n_samples)
+        texts_dataloader = self.dataloader(texts_dataset, batch_size=batch_size)
 
-    def tokenize_texts(self, texts, tasks_dict):
+        return texts_dataloader
+
+    def tokenize_texts(self, texts, tasks_dict, max_len):
+        texts = list(texts)
+
         encodings_dict = {}
 
-        encodings_dict['text'] = self.tokenizer.tokenize(texts)
+        encodings_dict['text'] = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_len,
+            padding='max_length'
+        )
+        print('tokenized tasks')
 
         if 'sentences' in tasks_dict.values():
             import spacy
@@ -153,7 +174,13 @@ class MultitaskInference:
             for text in texts:
                 doc = nlp(text)
                 sentences = [sent.text for sent in doc.sents]
-                sentence_encodings.append(self.tokenizer.tokenize(sentences))
+                sentence_encodings.append(
+                    self.tokenizer(
+                        sentences,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True)
+                )
 
             encodings_dict['sentences'] = sentence_encodings
 
@@ -190,37 +217,62 @@ class MultitaskInference:
 
         return predictions
 
-    def predict(self, texts, tasks_dict, text_batch_size=25):
+    def predict(self, texts, tasks_dict, max_len, text_batch_size=25):
         # tokenize texts
-        encodings_dict = self.tokenize_texts(texts, tasks_dict)
+        encodings_dict = self.tokenize_texts(texts, tasks_dict, max_len)
+        print('ENCODED!!!')
+
+
+        base_model_loader = self.encodings_to_loader(
+            encodings_dict['text'],
+            n_samples=len(encodings_dict['text'].encodings),
+            batch_size=text_batch_size
+        )
+        print('loader created')
+
+        base_model_text_out = self.infer_base_model(base_model_loader)
+
+
+        print('base model text predictions made')
 
         if 'sentences' in tasks_dict.values():
             ## get base model predictions for text level encodings
             base_model_sentence_out = []
             for sent_encodings in encodings_dict['sentences']:
-                out_temp = self.infer_base_model(self.dataloader(sent_encodings))
+
+                base_model_loader = self.encodings_to_loader(
+                    sent_encodings,
+                    n_samples=len(sent_encodings['input_ids']),
+                    batch_size=len(sent_encodings['input_ids'])
+                )
+
+                out_temp = self.infer_base_model(base_model_loader)
                 base_model_sentence_out.append(out_temp)
 
-        base_model_text_out = self.infer_base_model(
-            self.dataloader(encodings_dict['task'],
-                            batch_size=text_batch_size)
-        )
+
+        print('base model sentence predictions made')
+
+        #### make classifications
 
         predictions_dict = dict()
         # get predictions
-        for task in self.tasks:
+        for task in self.task_names:
             if tasks_dict[task] == 'sentences':
                 sentence_preds = []
+
                 for text_sents in base_model_sentence_out:
-                    classifier_out_temp = self.infer_classifier(self.dataloader(text_sents), task)
+                    classifier_out_temp = self.infer_classifier(
+                        self.dataloader(text_sents, batch_size=len(text_sents)),task
+                    )
+
                     sentence_preds.append(classifier_out_temp)
 
                 predictions_dict[task] = sentence_preds
+                print('sentence_classifications made')
 
             else:
                 task_preds = self.infer_classifier(
-                    self.dataloader(encodings_dict['texts'],
-                                    batch_size=text_batch_size)
+                    self.dataloader(base_model_text_out, batch_size=text_batch_size), task
                 )
                 predictions_dict[task] = task_preds
 
@@ -235,76 +287,30 @@ class MultitaskInference:
 
 checkpoint_dir = './multitask_model_adjusted_practice_175/checkpoint-2709'
 texts = list(cleaned_data['ANSWER'].sample(100))
-task = 'automarker'
 
-text = '''
-
-texts are really nice things to consider when you are making the best of something interesting.
-I never really knew what to think of the man who sat by the side of the road until he mentioned to me that there was 
-something odd and dispassionate about his face. he stood byt he side of the road and decided to carry on walking. to where, 
-no body knew. the only thing he wanted to was consider the thought of not even being htere any more.
-
-'''
-
-#model = MultitaskInference.decompose_from_checkpoint(checkpoint_dir)
-
-batch_size = 25
-max_len = 200
+task_dict = {
+    'automarker': 'text',
+    'cola': 'sentences'
+}
 
 model = MultitaskInference.load_multitask(checkpoint_dir+'/MultitaskModel_co_au.pkl')
 
-texts_encoded = model.tokenizer(texts, return_tensors="pt", truncation=True, max_length=max_len, padding='max_length')
-texts_dataset = MTLearningDataset(texts_encoded,  n_samples=len(texts))
-texts_dataloader = DataLoader(texts_dataset, batch_size=batch_size)
+preds = model.predict(
+    texts=texts,
+    tasks_dict=task_dict,
+    max_len=200,
+    text_batch_size=25
+)
 
-base_model_out = model.infer_base_model(texts_dataloader)
+preds_2 = model.predict(
+    texts=texts,
+    tasks_dict=task_dict,
+    max_len=200,
+    text_batch_size=25
+)
 
-classifier_loader = DataLoader(base_model_out)
+text_number = 1
+print(texts[text_number])
+print(preds['automarker'][text_number])
+print(preds['cola'][text_number])
 
-final_predictions = model.infer_classifier(task, classifier_loader)
-
-
-### data
-model.base_model.to(model.device)
-
-base_model_outputs = []
-with torch.no_grad():
-    for batch in tqdm(texts_dataloader):
-
-        input_ids = batch['input_ids'].to(model.device)
-        attention_mask = batch['attention_mask'].to(model.device)
-        out = model.base_model(input_ids, attention_mask)
-        base_model_outputs.extend(out.last_hidden_state)
-
-base_model_outputs = torch.stack(base_model_outputs)
-
-base_model_outputs[0].size()
-base_model_outputs[:2]
-model.classifiers[task].to(model.device)
-model.classifiers[task](base_model_outputs[:2])
-
-head_loader = DataLoader(base_model_outputs, batch_size=batch_size)
-
-predictions = []
-with torch.no_grad():
-    for batch in tqdm(head_loader):
-
-        out = model.classifiers[task](batch)
-        predictions.extend(out)
-
-
-import spacy
-model = spacy.load('en_core_web_sm')
-analysis = model('Yes you’re totally right :slight_smile:. From the tokenizer’s perspective, it doesn’t matter if the input string is composed of one or more sentences - it will split it into words/subwords according to the underlying tokenization algorithm (WordPiece in BERT’s case). In case you want to see the tokens directly, you can use the tokenizer’s convert_ids_to_tokens function on the input_ids returned by the tokenizer')
-
-texts = []
-for sent in analysis.sents:
-    texts.append(sent.text)
-
-
-from transformers import RobertaTokenizer
-
-tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-texts = [['this is text 1', 'this is text 2', 'This is text 3'], ['this is yet another text', 'and here is another!']]
-
-encodings = tokenizer.tokenize(texts)
