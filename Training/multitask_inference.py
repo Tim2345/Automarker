@@ -132,10 +132,32 @@ class MultitaskInference:
 
         return model
 
-    def __init__(self, tokenizer, base_model, classifiers):
+    def __init__(self, tokenizer, base_model, classifiers, data_loader=DataLoader):
         self.tokenizer = tokenizer
         self.base_model = base_model
         self.classifiers = classifiers
+        self.dataloader = data_loader
+
+
+    def tokenize_texts(self, texts, tasks_dict):
+        encodings_dict = {}
+
+        encodings_dict['text'] = self.tokenizer.tokenize(texts)
+
+        if 'sentences' in tasks_dict.values():
+            import spacy
+
+            nlp = spacy.load('en_core_web_sm')
+
+            sentence_encodings = []
+            for text in texts:
+                doc = nlp(text)
+                sentences = [sent.text for sent in doc.sents]
+                sentence_encodings.append(self.tokenizer.tokenize(sentences))
+
+            encodings_dict['sentences'] = sentence_encodings
+
+        return encodings_dict
 
 
     def infer_base_model(self, base_model_loader):
@@ -154,19 +176,59 @@ class MultitaskInference:
         return base_model_outputs
 
 
-    def infer_classifier(self, task, classifier_loader):
+    def infer_classifier(self, classifier_loader, task):
 
         model.classifiers[task].to(model.device)
 
         predictions = []
         with torch.no_grad():
-            for batch in tqdm(classifier_loader):
+            for batch in classifier_loader:
                 out = self.classifiers[task](batch)
                 predictions.extend(out)
 
         predictions = torch.stack(predictions)
 
         return predictions
+
+    def predict(self, texts, tasks_dict, text_batch_size=25):
+        # tokenize texts
+        encodings_dict = self.tokenize_texts(texts, tasks_dict)
+
+        if 'sentences' in tasks_dict.values():
+            ## get base model predictions for text level encodings
+            base_model_sentence_out = []
+            for sent_encodings in encodings_dict['sentences']:
+                out_temp = self.infer_base_model(self.dataloader(sent_encodings))
+                base_model_sentence_out.append(out_temp)
+
+        base_model_text_out = self.infer_base_model(
+            self.dataloader(encodings_dict['task'],
+                            batch_size=text_batch_size)
+        )
+
+        predictions_dict = dict()
+        # get predictions
+        for task in self.tasks:
+            if tasks_dict[task] == 'sentences':
+                sentence_preds = []
+                for text_sents in base_model_sentence_out:
+                    classifier_out_temp = self.infer_classifier(self.dataloader(text_sents), task)
+                    sentence_preds.append(classifier_out_temp)
+
+                predictions_dict[task] = sentence_preds
+
+            else:
+                task_preds = self.infer_classifier(
+                    self.dataloader(encodings_dict['texts'],
+                                    batch_size=text_batch_size)
+                )
+                predictions_dict[task] = task_preds
+
+        return predictions_dict
+
+
+
+
 
 ###load and run predictions
 # load all models from checkpoint
@@ -231,11 +293,18 @@ with torch.no_grad():
         predictions.extend(out)
 
 
+import spacy
+model = spacy.load('en_core_web_sm')
+analysis = model('Yes you’re totally right :slight_smile:. From the tokenizer’s perspective, it doesn’t matter if the input string is composed of one or more sentences - it will split it into words/subwords according to the underlying tokenization algorithm (WordPiece in BERT’s case). In case you want to see the tokens directly, you can use the tokenizer’s convert_ids_to_tokens function on the input_ids returned by the tokenizer')
+
+texts = []
+for sent in analysis.sents:
+    texts.append(sent.text)
 
 
+from transformers import RobertaTokenizer
 
+tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+texts = [['this is text 1', 'this is text 2', 'This is text 3'], ['this is yet another text', 'and here is another!']]
 
-
-
-
-
+encodings = tokenizer.tokenize(texts)
