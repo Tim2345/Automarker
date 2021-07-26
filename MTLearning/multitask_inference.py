@@ -302,6 +302,8 @@ preds = model.predict(
     text_batch_size=25
 )
 
+
+
 preds_2 = model.predict(
     texts=texts,
     tasks_dict=task_dict,
@@ -309,7 +311,7 @@ preds_2 = model.predict(
     text_batch_size=25
 )
 
-text_number = 1
+text_number = 0
 print(texts[text_number])
 print(preds['automarker'][text_number])
 print(preds['cola'][text_number])
