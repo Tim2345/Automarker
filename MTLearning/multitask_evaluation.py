@@ -8,6 +8,9 @@ import seaborn as sns
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
+matplotlib.use('Agg')
+
+import pickle
 
 
 class MultitaskEvaluator:
@@ -18,6 +21,8 @@ class MultitaskEvaluator:
         self.y_preds = y_preds.cpu().detach().numpy().reshape(-1,1)
         self.model_config = model_config
         self.scaling = scaling #two element tuple (mean,  std) of training data
+
+        self.model_config.save_path = model_config.name_or_path.rsplit('/', 1)[0]
 
     def scale_values(self, vals, mean, sd, direction='up'):
         '''
@@ -57,7 +62,12 @@ class MultitaskEvaluator:
             'rmse': np.sqrt(mse)
         }
         if corr==True:
-            reg_metrics_dict['spearman_r'] = spearmanr(y_true, y_preds)
+            reg_metrics_dict['spearman_r'] = spearmanr(y_true, y_preds)[0]
+
+        reg_metrics_df = pd.DataFrame(reg_metrics_dict, index=[0])
+
+        reg_metrics_df.to_excel(self.model_config.save_path+'/reg_metrics_df.xlsx')
+
 
         return reg_metrics_dict
 
@@ -71,7 +81,7 @@ class MultitaskEvaluator:
 
         heatmap = sns.heatmap(cf_mat, annot=True)
         fig = heatmap.get_figure()
-        fig.savefig(self.model_config.name_or_path)
+        fig.savefig(self.model_config.save_path+'/conf_mat_heatmap.png')
 
 
 
@@ -85,25 +95,41 @@ class MultitaskEvaluator:
     def get_metrics_by_score(self, min_limit=0):
 
         y_true = self.y_true
-        print(y_true)
-        y_preds = np.round(self.scale_values(self.y_preds, self.scaling[0], self.scaling[1]), 0)
-        print(y_preds)
-        print('scaled_df')
+        y_preds = self.scale_values(self.y_preds, self.scaling[0], self.scaling[1])
+
         results_df = pd.DataFrame({'y_true': y_true.ravel(),
                                    'y_preds': y_preds.ravel()})
-        print('created df')
-        print(results_df.columns)
+
         results_df = results_df.groupby('y_true')
-        print('grouped df')
+
         metrics_by_score_list = [self.concat_dfs(df[1]['y_true'], df[1]['y_preds'], df[0])
                                  for df in results_df
                                  if df[1].shape[0] >= min_limit
                                  ]
 
         metrics_by_score_df = pd.concat(metrics_by_score_list)
+        metrics_by_score_df.to_excel(self.model_config.save_path+'/metrics_by_score.xlsx')
 
         return metrics_by_score_df
 
+
     def get_cross_plot(self):
+
+        y_preds = self.scale_values(self.y_preds, self.scaling[0], self.scaling[1])
+        data = pd.DataFrame({
+            'Human marker': self.y_true.ravel(),
+            'Automated marker': y_preds.ravel()
+        })
+
+        crossplot = sns.regplot(data=data, x='Human marker', y='Automated marker')
+        fig = crossplot.get_figure()
+        fig.savefig(self.model_config.save_path+'/true_pred_xplot.png')
+
+    def pickle_me(self):
+
+        outfile = open(self.model_config.save_path+'/eval_obj.pkl', 'wb')
+        pickle.dump(self, outfile)
+
+        print("You've done gone pickled me so I'll be sittin' ere till you pull me out!!")
 
 
