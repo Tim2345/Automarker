@@ -125,6 +125,24 @@ class MultitaskEvaluator:
         fig = crossplot.get_figure()
         fig.savefig(self.model_config.save_path+'/true_pred_xplot.png')
 
+    def get_prediction_distribution(self):
+
+        y_preds = self.scale_values(self.y_preds, self.scaling[0], self.scaling[1])
+        val_range = np.concatenate([self.y_true, y_preds])
+        n_bins = int(np.round(np.max(val_range) - np.min(val_range), 0) + 1)
+
+        data = pd.DataFrame({
+            'Human marker': self.y_true.ravel(),
+            'Automated marker': y_preds.ravel()
+        })
+
+        sns.histplot(data=data, x='Human marker', bins=n_bins, binwidth=1, kde=False, color='skyblue', label='Human marker')
+        sns.histplot(data=data, x='Automated marker', bins=n_bins, binwidth=1, kde=False, color='gold', label='Automated marker')
+        plt.legend()
+        plt.savefig(self.model_config.save_path + '/prediction_distribution.png')
+        plt.clf()
+
+
     def pickle_me(self):
 
         outfile = open(self.model_config.save_path+'/eval_obj.pkl', 'wb')
