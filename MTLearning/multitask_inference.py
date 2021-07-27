@@ -10,8 +10,6 @@ import transformers
 import pickle
 from tqdm import tqdm
 
-from Automarker.scripts.data_prep.train_test_set import augmented_data, cleaned_data
-
 
 class MTLearningDataset(torch.utils.data.Dataset):
     def __init__(self, encodings, n_samples):
@@ -69,7 +67,7 @@ def check_cuda():
         return 'cpu'
 
 
-class MultitaskInference:
+class MultitaskInference(object):
 
     @property
     def task_names(self):
@@ -195,7 +193,7 @@ class MultitaskInference:
             for batch in tqdm(base_model_loader):
                 input_ids = batch['input_ids'].to(self.device)
                 attention_mask = batch['attention_mask'].to(self.device)
-                out = model.base_model(input_ids, attention_mask)
+                out = self.base_model(input_ids, attention_mask)
                 base_model_outputs.extend(out.last_hidden_state)
 
         base_model_outputs = torch.stack(base_model_outputs)
@@ -205,7 +203,7 @@ class MultitaskInference:
 
     def infer_classifier(self, classifier_loader, task):
 
-        model.classifiers[task].to(model.device)
+        self.classifiers[task].to(self.device)
 
         predictions = []
         with torch.no_grad():
@@ -280,39 +278,4 @@ class MultitaskInference:
 
 
 
-
-
-###load and run predictions
-# load all models from checkpoint
-
-checkpoint_dir = './multitask_model_adjusted_practice_175/checkpoint-2709'
-texts = list(cleaned_data['ANSWER'].sample(100))
-
-task_dict = {
-    'automarker': 'text',
-    'cola': 'sentences'
-}
-
-model = MultitaskInference.load_multitask(checkpoint_dir+'/MultitaskModel_co_au.pkl')
-
-preds = model.predict(
-    texts=texts,
-    tasks_dict=task_dict,
-    max_len=200,
-    text_batch_size=25
-)
-
-
-
-preds_2 = model.predict(
-    texts=texts,
-    tasks_dict=task_dict,
-    max_len=200,
-    text_batch_size=25
-)
-
-text_number = 0
-print(texts[text_number])
-print(preds['automarker'][text_number])
-print(preds['cola'][text_number])
 
