@@ -169,6 +169,7 @@ class MultitaskInference(object):
             nlp = spacy.load('en_core_web_sm')
 
             sentence_encodings = []
+            sentences_split = []
             for text in texts:
                 doc = nlp(text)
                 sentences = [sent.text for sent in doc.sents]
@@ -179,18 +180,27 @@ class MultitaskInference(object):
                         padding=True,
                         truncation=True)
                 )
+                sentences_split.append(sentences)
 
             encodings_dict['sentences'] = sentence_encodings
+            encodings_dict['sentences_text'] = sentences_split
 
         return encodings_dict
 
 
-    def infer_base_model(self, base_model_loader):
+    def infer_base_model(self, base_model_loader, level='sentences'):
         self.base_model.to(self.device)
 
         base_model_outputs = []
+        if level == 'sentences':
+            iterprint = 'base_model_loader'
+        elif level == 'text':
+            iterprint = 'tqdm(base_model_loader)'
+        else:
+            raise RuntimeError('level not know to tqdm()')
+
         with torch.no_grad():
-            for batch in tqdm(base_model_loader):
+            for batch in eval(iterprint):
                 input_ids = batch['input_ids'].to(self.device)
                 attention_mask = batch['attention_mask'].to(self.device)
                 out = self.base_model(input_ids, attention_mask)
@@ -218,25 +228,21 @@ class MultitaskInference(object):
     def predict(self, texts, tasks_dict, max_len, text_batch_size=25):
         # tokenize texts
         encodings_dict = self.tokenize_texts(texts, tasks_dict, max_len)
-        print('ENCODED!!!')
-
-
+        print('Extracting final hidden states from base model at text level...')
         base_model_loader = self.encodings_to_loader(
             encodings_dict['text'],
             n_samples=len(encodings_dict['text'].encodings),
             batch_size=text_batch_size
         )
-        print('loader created')
 
-        base_model_text_out = self.infer_base_model(base_model_loader)
+        base_model_text_out = self.infer_base_model(base_model_loader, 'text')
 
-
-        print('base model text predictions made')
 
         if 'sentences' in tasks_dict.values():
+            print('Extracting final hidden states from base model at sentence level...')
             ## get base model predictions for text level encodings
             base_model_sentence_out = []
-            for sent_encodings in encodings_dict['sentences']:
+            for sent_encodings in tqdm(encodings_dict['sentences']):
 
                 base_model_loader = self.encodings_to_loader(
                     sent_encodings,
@@ -244,9 +250,8 @@ class MultitaskInference(object):
                     batch_size=len(sent_encodings['input_ids'])
                 )
 
-                out_temp = self.infer_base_model(base_model_loader)
+                out_temp = self.infer_base_model(base_model_loader, 'sentences')
                 base_model_sentence_out.append(out_temp)
-
 
         print('base model sentence predictions made')
 
@@ -255,10 +260,11 @@ class MultitaskInference(object):
         predictions_dict = dict()
         # get predictions
         for task in self.task_names:
+            print("Classifying {} task...".format(task))
             if tasks_dict[task] == 'sentences':
                 sentence_preds = []
 
-                for text_sents in base_model_sentence_out:
+                for text_sents in tqdm(base_model_sentence_out):
                     classifier_out_temp = self.infer_classifier(
                         self.dataloader(text_sents, batch_size=len(text_sents)),task
                     )
@@ -270,9 +276,11 @@ class MultitaskInference(object):
 
             else:
                 task_preds = self.infer_classifier(
-                    self.dataloader(base_model_text_out, batch_size=text_batch_size), task
+                    tqdm(self.dataloader(base_model_text_out, batch_size=text_batch_size)), task
                 )
                 predictions_dict[task] = task_preds
+
+        predictions_dict['sentences_text'] = encodings_dict['sentences_text']
 
         return predictions_dict
 
