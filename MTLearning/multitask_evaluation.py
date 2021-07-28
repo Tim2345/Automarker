@@ -18,7 +18,7 @@ class MultitaskEvaluator:
     def __init__(self, y_true, y_preds, model_config, scaling):
 
         self.y_true = y_true.to_numpy().reshape(-1, 1)
-        self.y_preds = y_preds.cpu().detach().numpy().reshape(-1,1)
+        self.y_preds = y_preds.reshape(-1,1)
         self.model_config = model_config
         self.scaling = scaling #two element tuple (mean,  std) of training data
 
