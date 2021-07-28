@@ -269,7 +269,7 @@ class MultitaskInference(object):
                         self.dataloader(text_sents, batch_size=len(text_sents)),task
                     )
 
-                    sentence_preds.append(classifier_out_temp)
+                    sentence_preds.append(classifier_out_temp.cpu().numpy())
 
                 predictions_dict[task] = sentence_preds
                 print('sentence_classifications made')
@@ -278,7 +278,7 @@ class MultitaskInference(object):
                 task_preds = self.infer_classifier(
                     tqdm(self.dataloader(base_model_text_out, batch_size=text_batch_size)), task
                 )
-                predictions_dict[task] = task_preds
+                predictions_dict[task] = task_preds.cpu().numpy()
 
         predictions_dict['sentences_text'] = encodings_dict['sentences_text']
 
