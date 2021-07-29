@@ -86,6 +86,7 @@ class MultitaskInference(object):
             for model_name, model_path
             in model_dict.items()
         }
+        print(len(loaded_models))
 
         base_model = loaded_models[list(model_dict.keys())[0]].base_model
 
