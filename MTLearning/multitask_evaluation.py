@@ -82,6 +82,7 @@ class MultitaskEvaluator:
         heatmap = sns.heatmap(cf_mat, annot=True)
         fig = heatmap.get_figure()
         fig.savefig(self.model_config.save_path+'/conf_mat_heatmap.png')
+        fig.clf()
 
 
 
@@ -124,6 +125,7 @@ class MultitaskEvaluator:
         crossplot = sns.regplot(data=data, x='Human marker', y='Automated marker')
         fig = crossplot.get_figure()
         fig.savefig(self.model_config.save_path+'/true_pred_xplot.png')
+        fig.clf
 
     def get_prediction_distribution(self):
 
